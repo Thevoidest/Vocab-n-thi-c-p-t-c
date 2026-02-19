@@ -463,7 +463,7 @@ function renderQuiz() {
     <div class="qcard-options">
       ${q.options.map((opt, i) => `
         <button class="opt-btn" data-val="${escHtml(opt)}"
-          onclick="handleAnswer(this, '${escHtml(q.answer)}', '${escHtml(word.word)}', '${escHtml(word.meaning)}')">
+          onclick="handleAnswer(this, '${escHtml(q.answer)}', '${escHtml(word.word)}', '${escHtml(word.meaning)}', '${escHtml(q.type)}')">
           <span class="opt-key">${keys[i]}</span>
           ${opt}
         </button>
@@ -478,7 +478,7 @@ function escHtml(str) {
   return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
-function handleAnswer(btn, correctAnswer, wordStr, wordMeaning) {
+function handleAnswer(btn, correctAnswer, wordStr, wordMeaning, qType) {
   document.querySelectorAll('.opt-btn').forEach(b => b.disabled = true);
   const chosen = btn.dataset.val;
   const isCorrect = chosen === correctAnswer;
@@ -490,7 +490,6 @@ function handleAnswer(btn, correctAnswer, wordStr, wordMeaning) {
     updateSRSWord(wordStr, true);
   } else {
     btn.classList.add('wrong');
-    // highlight correct
     document.querySelectorAll('.opt-btn').forEach(b => {
       if (b.dataset.val === correctAnswer) b.classList.add('correct');
     });
@@ -498,7 +497,6 @@ function handleAnswer(btn, correctAnswer, wordStr, wordMeaning) {
     S.wrong++;
     if (!S.wrongWords.includes(wordStr)) S.wrongWords.push(wordStr);
     updateSRSWord(wordStr, false);
-    // Shake card
     const card = document.getElementById('quizCard');
     card.classList.add('shake');
     setTimeout(() => card.classList.remove('shake'), 350);
@@ -506,28 +504,51 @@ function handleAnswer(btn, correctAnswer, wordStr, wordMeaning) {
 
   updateProgress();
 
-  // Show result strip
   const card = document.getElementById('quizCard');
   const strip = document.createElement('div');
   strip.className = 'result-strip ' + (isCorrect ? 'ok' : 'bad');
-  strip.innerHTML = `
-    <span class="strip-icon">${isCorrect ? '✓' : '✗'}</span>
-    <span>${isCorrect ? 'Correct!' : 'Missed!'}</span>
-    ${!isCorrect ? `<span class="strip-correct-answer">${wordStr} = ${wordMeaning}</span>` : ''}
-  `;
-  card.appendChild(strip);
 
+  const REINFORCE_TYPES = ['COLLOCATION','CONNOTATION','ANTONYM','FILL IN'];
+  const needsReinforce = REINFORCE_TYPES.includes(qType);
+
+  if (isCorrect) {
+    strip.innerHTML = needsReinforce
+      ? `<span class="strip-icon">✓</span>
+         <div class="strip-wrong-info">
+           <span class="strip-missed" style="color:var(--green)"><strong>${wordStr}</strong> = ${wordMeaning}</span>
+           <span class="strip-correct-answer" style="opacity:.8">${correctAnswer}</span>
+         </div>`
+      : `<span class="strip-icon">✓</span><span>Correct!</span>`;
+    card.appendChild(strip);
+    clearTimeout(S.advanceTimer);
+    S.advanceTimer = setTimeout(() => { S.queuePos++; renderQuiz(); }, needsReinforce ? 1800 : 500);
+  } else {
+    strip.innerHTML = `
+      <span class="strip-icon">✗</span>
+      <div class="strip-wrong-info">
+        <span class="strip-missed"><strong>${wordStr}</strong> = ${wordMeaning}</span>
+        <span class="strip-correct-answer">Đáp án đúng: ${correctAnswer}</span>
+      </div>
+      <button class="strip-next-btn" onclick="advanceNext()">Tiếp →</button>
+    `;
+    card.appendChild(strip);
+  }
+}
+
+function advanceNext() {
   clearTimeout(S.advanceTimer);
-  const delay = isCorrect ? 500 : 1800;
-  S.advanceTimer = setTimeout(() => {
-    S.queuePos++;
-    renderQuiz();
-  }, delay);
+  S.queuePos++;
+  renderQuiz();
 }
 
 // Keyboard shortcuts
 document.addEventListener('keydown', e => {
   if (!document.getElementById('session').classList.contains('active')) return;
+  // Space/Enter → click Next button if showing
+  if (e.key === ' ' || e.key === 'Enter') {
+    const nextBtn = document.querySelector('.strip-next-btn');
+    if (nextBtn) { e.preventDefault(); nextBtn.click(); return; }
+  }
   const map = { a:0, b:1, c:2, d:3, 1:0, 2:1, 3:2, 4:3 };
   const idx = map[e.key.toLowerCase()];
   if (idx === undefined) return;
