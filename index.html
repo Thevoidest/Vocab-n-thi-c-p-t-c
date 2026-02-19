@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>IELTS Blitz</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ════════════════ HOME ════════════════ -->
+<div id="home" class="screen active">
+  <div class="home-nav">
+    <div class="logo-mark">Blitz<span>.</span></div>
+    <div class="guest-pill" id="guestPill">guest</div>
+  </div>
+
+  <div class="home-hero">
+    <div class="hero-card">
+      <div class="hero-title">IELTS Vocab</div>
+      <div class="hero-big">Drill fast.<br>Score higher.</div>
+      <div class="hero-sub">Cambridge 13–20 · Road to IELTS</div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="hero-stat-num" id="heroTotal">0</div>
+          <div class="hero-stat-label">Words studied</div>
+        </div>
+        <div class="hero-stat">
+          <div class="hero-stat-num" id="heroDue">0</div>
+          <div class="hero-stat-label">Due today</div>
+        </div>
+      </div>
+      <button class="review-due-btn" id="reviewDueBtn" onclick="startDueSession()" style="display:none">
+        🔔 Ôn từ hôm nay — <span id="reviewDueCount">0</span> từ
+      </button>
+    </div>
+  </div>
+
+  <div class="book-tabs-wrap">
+    <div class="tab-row" id="bookTabs"></div>
+  </div>
+
+  <div class="tests-section">
+    <div class="section-hd" id="sectionHd">Tests</div>
+    <div class="test-list" id="testList"></div>
+  </div>
+</div>
+
+<!-- ════════════════ SESSION ════════════════ -->
+<div id="session" class="screen">
+  <div class="session-bar">
+    <button class="back-btn" id="backBtn">←</button>
+    <div class="session-title-text" id="sessionTitle">—</div>
+    <div class="live-score"><span class="c" id="liveC">0</span> / <span class="w" id="liveW">0</span></div>
+  </div>
+  <div class="prog-wrap">
+    <div class="prog-bar-outer">
+      <div class="prog-bar-inner" id="progBar" style="width:0%"></div>
+    </div>
+  </div>
+  <div class="retry-banner" id="retryBanner">↻ Retry Round — Missed Words</div>
+  <div class="stage">
+    <div class="quiz-card card-anim" id="quizCard"><!-- dynamic --></div>
+  </div>
+</div>
+
+<!-- ════════════════ RESULTS ════════════════ -->
+<div id="results" class="screen">
+  <div class="res-card">
+    <div class="res-top">
+      <span class="res-emoji" id="resEmoji">🎯</span>
+      <div class="res-label">Session Complete</div>
+      <div class="res-big" id="resBig">—</div>
+      <div class="res-sub" id="resSub">—</div>
+    </div>
+    <div class="res-stats">
+      <div class="res-stat"><div class="res-stat-num c" id="resC">0</div><div class="res-stat-label">Correct</div></div>
+      <div class="res-stat"><div class="res-stat-num w" id="resW">0</div><div class="res-stat-label">Missed</div></div>
+      <div class="res-stat"><div class="res-stat-num t" id="resT">0</div><div class="res-stat-label">Total</div></div>
+    </div>
+    <div class="missed-words-wrap" id="missedWrap" style="display:none">
+      <div class="missed-hd">Review these</div>
+      <div class="missed-chips" id="missedChips"></div>
+    </div>
+    <div class="srs-info" id="srsInfo">
+      <span class="srs-info-icon">📅</span>
+      <span id="srsInfoText">Progress saved. Next review scheduled.</span>
+    </div>
+    <div class="res-actions">
+      <button class="btn btn-accent" id="retryMissedBtn">↻ Drill missed words</button>
+      <button class="btn btn-outline" id="restartBtn">↺ Full restart</button>
+      <button class="btn btn-outline" id="toHomeBtn">← All tests</button>
+    </div>
+  </div>
+</div>
+
+<script src="data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
