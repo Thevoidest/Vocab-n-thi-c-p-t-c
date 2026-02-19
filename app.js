@@ -269,12 +269,14 @@ function startDueSession() {
   });
 
   if (dueWords.length === 0) return;
+  S.definitionOnly = true;
   startSession('cambridge', 'due_session', null, `🔔 Ôn từ hôm nay · ${dueWords.length} từ`, dueWords);
 }
 
 
 function startSession(bookKey, sessionId, rawData, title, overrideWords) {
   clearTimeout(S.advanceTimer);
+  if (sessionId !== 'due_session') S.definitionOnly = false;
 
   const words = overrideWords || Object.entries(rawData).map(([word, d]) => ({ word, ...d }));
 
@@ -315,132 +317,230 @@ function updateProgress() {
 // ════════════════════════════════════════════
 // QUIZ ENGINE
 // ════════════════════════════════════════════
+// QUIZ ENGINE — v3
+// Types: flashcard, viToEn, antonym, collocation,
+//        fillIn, connotation, wordForm
+// ════════════════════════════════════════════
 
-// Question type generators — return { prompt, options, answer, badgeClass }
 const QTypes = {
-  definition(word, allWords) {
-    const others = allWords.filter(w => w.word !== word.word);
-    const distractors = pick(others, 3).map(w => w.meaning);
-    const options = shuffle([word.meaning, ...distractors]);
+
+  // ── 1. FLASHCARD ─────────────────────────
+  // Show word + example → self-rate recall
+  flashcard(word) {
     return {
-      type: 'DEFINITION', badgeClass: 'badge-def',
-      prompt: `What does <strong>${word.word}</strong> mean?`,
-      options,
-      answer: word.meaning,
+      type: 'FLASHCARD', badgeClass: 'badge-def',
+      isFlashcard: true, word,
+      prompt: null, options: [], answer: '__flashcard__',
     };
   },
 
+  // ── 2. VI → EN ───────────────────────────
+  // Show Vietnamese meaning → pick correct English word
+  // Distractors: same type preferred; fallback to any type; final fallback cross-pool
+  viToEn(word, allWords) {
+    const others = allWords.filter(w => w.word !== word.word);
+    const sameType = others.filter(w => w.type === word.type);
+    // Build pool: prefer same type, pad with any type if needed
+    let distPool = sameType.length >= 3 ? sameType : others;
+    if (distPool.length < 3) return null;
+    const distractors = pick(distPool, 3).map(w => w.word);
+    const options = shuffle([word.word, ...distractors]);
+    return {
+      type: 'VI → EN', badgeClass: 'badge-vi',
+      prompt: `Từ nào có nghĩa: <strong>"${word.meaning}"</strong>?`,
+      options, answer: word.word,
+    };
+  },
+
+  // ── 3. ANTONYM ───────────────────────────
+  // Distractors: same type first, pad with any type
   antonym(word, allWords) {
     if (!word.antonym) return null;
-    const others = allWords.filter(w => w.antonym && w.word !== word.word);
-    const distractors = pick(others, 3).map(w => w.antonym);
-    if (distractors.length < 3) return null;
-    const options = shuffle([word.antonym, ...distractors]);
+    const withAnt = allWords.filter(w => w.antonym && w.word !== word.word);
+    const sameType = withAnt.filter(w => w.type === word.type);
+    const distPool = sameType.length >= 3 ? sameType : withAnt;
+    if (distPool.length < 3) return null;
+    const distractors = pick(distPool, 3).map(w => w.antonym);
+    // Guard: deduplicate (very rare but possible if antonyms repeat)
+    const unique = [...new Set([word.antonym, ...distractors])];
+    if (unique.length < 4) return null;
+    const options = shuffle(unique.slice(0, 4));
     return {
       type: 'ANTONYM', badgeClass: 'badge-ant',
       prompt: `Which word is the <strong>opposite</strong> of <strong>${word.word}</strong>?`,
-      options,
-      answer: word.antonym,
+      options, answer: word.antonym,
     };
   },
 
-  collocation(word, allWords) {
+  // ── 4. COLLOCATION ───────────────────────
+  // All 4 options contain target word — only the partner word differs
+  collocation(word) {
     if (!word.collocation) return null;
+    const coll = word.collocation;
+    const target = word.word.toLowerCase();
+    const SKIP = new Set(['the','a','an','of','to','in','for','on','at','with','by','from']);
+    const parts = coll.toLowerCase().split(' ');
+    const targetParts = target.split(' ');
 
-    // Generate plausible-but-wrong collocations for THIS word
-    // by swapping the partner noun/verb with unrelated ones
-    const WRONG_PARTNERS = {
-      noun:      ['problem','weather','mistake','situation','number','period','result','damage'],
-      verb:      ['break','ignore','remove','delay','cancel','avoid','reduce','reject'],
-      adjective: ['recent','simple','daily','minor','physical','direct','basic','sharp'],
-      adverb:    ['quickly','fully','broadly','partly','deeply','rarely','heavily','strictly'],
+    // Find target span in collocation string
+    let tStart = -1;
+    for (let i = 0; i <= parts.length - targetParts.length; i++) {
+      if (targetParts.every((tp, j) => parts[i+j] === tp)) { tStart = i; break; }
+    }
+    if (tStart === -1) return null;
+    const tEnd = tStart + targetParts.length - 1;
+
+    // Find nearest meaningful (non-article) word outside target span — that's what we swap
+    let partnerIdx = -1;
+    for (let i = tStart - 1; i >= 0; i--) {
+      if (!SKIP.has(parts[i])) { partnerIdx = i; break; }
+    }
+    if (partnerIdx === -1) {
+      for (let i = tEnd + 1; i < parts.length; i++) {
+        if (!SKIP.has(parts[i])) { partnerIdx = i; break; }
+      }
+    }
+    if (partnerIdx === -1) return null;
+
+    // Wrong partners by word type
+    // noun target   → swap the verb/adj before it
+    // verb target   → swap the adverb after it
+    // adj target    → swap the noun after it
+    // adverb target → swap the verb before it
+    const POOLS = {
+      noun:      ['gain','lose','build','create','seek','avoid','challenge','damage','restore','maintain','undermine','exacerbate'],
+      verb:      ['rapidly','gradually','significantly','completely','consistently','severely','steadily','dramatically','temporarily','partially'],
+      adjective: ['growth','progress','decline','situation','shift','response','outcome','pressure','demand','behaviour','capacity'],
+      adverb:    ['act','respond','behave','operate','perform','react','engage','proceed','function','develop','approach'],
+      phrase:    ['gain','lose','build','seek','avoid','challenge','damage','restore','maintain','undermine'],
     };
-    const pool = WRONG_PARTNERS[word.type] || WRONG_PARTNERS.noun;
-    // Take the first word of collocation (usually the verb/adj partner), replace the noun
-    const parts = word.collocation.split(' ');
-    const wrongPartners = shuffle(pool.filter(p => !word.collocation.includes(p))).slice(0, 3);
-    const distractors = wrongPartners.map(p => {
-      // Replace last word of collocation with wrong partner
-      const wrongParts = [...parts];
-      wrongParts[wrongParts.length - 1] = p;
-      return wrongParts.join(' ');
-    });
+    const pool = POOLS[word.type] || POOLS.noun;
+    const partner = parts[partnerIdx];
+    const wrongs = pool.filter(p => p !== partner && !coll.toLowerCase().includes(p)).slice(0, 3);
+    if (wrongs.length < 2) return null;
 
-    if (distractors.length < 2) return null;
-    const options = shuffle([word.collocation, ...distractors]);
+    const origParts = coll.split(' ');
+    const distractors = wrongs.map(w => { const d=[...origParts]; d[partnerIdx]=w; return d.join(' '); });
+    const options = shuffle([coll, ...distractors]);
     return {
       type: 'COLLOCATION', badgeClass: 'badge-coll',
       prompt: `Which phrase correctly uses <strong>${word.word}</strong>?`,
-      options,
-      answer: word.collocation,
+      options, answer: coll,
     };
   },
 
-  sentiment(word) {
+  // ── 5. FILL IN ───────────────────────────
+  // Distractors same type → student can't eliminate by grammar alone
+  fillIn(word, allWords) {
     if (!word.example) return null;
-
-    // Determine sentiment from meaning and antonym data
-    const NEGATIVE_SIGNALS = ['tiêu cực','tàn phá','xấu','hại','nguy','tệ','chết','sụp đổ','kìm hãm',
-      'thờ ơ','trì hoãn','mất','giảm','cạn','thèm','khuất phục','xẹp','lảo đảo','giật mình',
-      'deleterious','demise','stifle','subjugate','indifference','deflated','dwindling','coveting',
-      'lobotomy','crippled','shrink','detrimental','harmful','collapse','decay','deplete'];
-    const POSITIVE_SIGNALS = ['tích cực','viên mãn','nở rộ','đồng hành','khuyến khích','sáng suốt',
-      'fulfill','blossom','positive','thrive','reinforce','ripen','alert','incentive','virtue',
-      'companionship','judiciously','tailored','fulfilled','resist','prevent'];
-    const NEUTRAL_SIGNALS = ['nhịp sinh học','thủy triều','bình minh','phân rã','tiêu hóa',
-      'circadian','tidal','radioactive','digestive','narrative','motif','tertiary','rod','odour',
-      'cholera','lobotomy','preliminary','protagonist'];
-
-    const textToCheck = (word.meaning + ' ' + word.word + ' ' + (word.antonym || '')).toLowerCase();
-
-    let correctSentiment;
-    if (NEGATIVE_SIGNALS.some(s => textToCheck.includes(s.toLowerCase()))) {
-      correctSentiment = 'Negative 👎';
-    } else if (POSITIVE_SIGNALS.some(s => textToCheck.includes(s.toLowerCase()))) {
-      correctSentiment = 'Positive 👍';
-    } else if (NEUTRAL_SIGNALS.some(s => textToCheck.includes(s.toLowerCase()))) {
-      correctSentiment = 'Both 🔄';
-    } else {
-      correctSentiment = word.antonym ? 'Positive 👍' : 'Both 🔄';
-    }
-
-    const allOptions = ['Positive 👍', 'Negative 👎', 'Both 🔄'];
-    // Shuffle but keep correct in the mix
-    const distractors = allOptions.filter(o => o !== correctSentiment);
-    const options = shuffle([correctSentiment, ...distractors]);
-
-    return {
-      type: 'CONNOTATION', badgeClass: 'badge-tf',
-      prompt: `Read the sentence. What is the connotation of <strong>${word.word}</strong>?<span class="qcard-sentence">"${word.example}"</span>`,
-      options,
-      answer: correctSentiment,
-    };
-  },
-
-  wordInContext(word, allWords) {
-    if (!word.example) return null;
-    const blanked = word.example.replace(new RegExp(`\\b${word.word}\\b`, 'i'), '________');
+    const target = word.word;
+    const escaped = target.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const blanked = word.example.replace(new RegExp(escaped, 'i'), '________');
     if (!blanked.includes('________')) return null;
     const others = allWords.filter(w => w.word !== word.word);
-    const distractors = pick(others, 3).map(w => w.word);
-    const options = shuffle([word.word, ...distractors]);
+    const sameType = others.filter(w => w.type === word.type);
+    const distPool = sameType.length >= 3 ? sameType : others;
+    if (distPool.length < 3) return null;
+    const distractors = pick(distPool, 3).map(w => w.word);
+    const options = shuffle([target, ...distractors]);
     return {
-      type: 'FILL IN', badgeClass: 'badge-coll',
-      prompt: `Fill in the blank:<span class="qcard-sentence">"${blanked}"</span>`,
-      options,
-      answer: word.word,
+      type: 'FILL IN', badgeClass: 'badge-fill',
+      prompt: `Complete the sentence:<div class="qcard-sentence">"${blanked}"</div>`,
+      options, answer: target,
+    };
+  },
+
+  // ── 6. CONNOTATION ───────────────────────
+  // Uses word.connotation field ('positive'/'negative'/'neutral') if set in data.
+  // Fallback: whole-word Vietnamese keyword matching (not substring).
+  connotation(word) {
+    if (!word.example) return null;
+    // Whole-word match using word boundaries in Vietnamese-friendly way:
+    // split text into space-separated tokens and check exact token membership
+    const matchWords = (text, keywords) => {
+      const tokens = text.toLowerCase().split(/[\s,./()]+/);
+      return keywords.some(k => tokens.includes(k.toLowerCase()));
+    };
+    const NEG_KW = ['hại','nguy hiểm','xấu','tệ','mất mát','sụp đổ','kìm hãm','thờ ơ','suy giảm','cạn kiệt','thèm muốn','lảo đảo','xẹp xuống','trì hoãn','tàn phá','khuất phục','bất bình','tàn tật','bóc lột','trục xuất','thiên vị','tiêu cực','tàn ác','nguy hại','phá hoại','sụt giảm','mồ côi','dịch','bệnh','chênh lệch'];
+    const POS_KW = ['tích cực','tốt','viên mãn','đồng hành','khuyến khích','sáng suốt','nở rộ','thỏa mãn','hào phóng','sống động','đột phá','thành thạo','tái khẳng định','vượt ra','lành tính','vô hại','linh hoạt','đức hạnh','thành tích'];
+
+    let correct = word.connotation || null;
+    if (!correct) {
+      const txt = word.meaning + ' ' + (word.antonym || '');
+      if (matchWords(txt, NEG_KW)) correct = 'negative';
+      else if (matchWords(txt, POS_KW)) correct = 'positive';
+      else correct = 'neutral';
+    }
+    const MAP = { positive: 'Positive 👍', negative: 'Negative 👎', neutral: 'Neutral 🔄' };
+    const answer = MAP[correct] || 'Neutral 🔄';
+    const options = shuffle(['Positive 👍', 'Negative 👎', 'Neutral 🔄']);
+    return {
+      type: 'CONNOTATION', badgeClass: 'badge-tf',
+      prompt: `What is the connotation of <strong>${word.word}</strong>?<div class="qcard-sentence">"${word.example}"</div>`,
+      options, answer,
+    };
+  },
+
+  // ── 7. WORD FORM ─────────────────────────
+  // Uses word.forms: { noun, verb, adjective, adverb }
+  // Uses word.formExamples: { noun: '...', verb: '...' } for custom sentences
+  // Fallback sentences are grammatically correct per form type
+  wordForm(word, allWords) {
+    if (!word.forms) return null;
+    const available = Object.entries(word.forms).filter(([, v]) => v);
+    if (available.length < 2) return null;
+
+    const [targetType, targetForm] = available[Math.floor(Math.random() * available.length)];
+
+    // Wrong options: other forms of this word first, then forms from other words
+    const wrongSameWord = available.filter(([t]) => t !== targetType).map(([, v]) => v);
+    const wrongOther = allWords
+      .filter(w => w.word !== word.word && w.forms)
+      .flatMap(w => Object.values(w.forms).filter(Boolean))
+      .filter(f => f !== targetForm && !wrongSameWord.includes(f));
+
+    const distPool = [...wrongSameWord, ...wrongOther];
+    if (distPool.length < 3) return null;
+    const distractors = pick(distPool.map(f => ({ word: f })), 3).map(x => x.word);
+    const options = shuffle([targetForm, ...distractors]);
+
+    // Per-form-type fallback templates that are grammatically natural
+    const TEMPLATES = {
+      noun:      `The _______ became a major topic of debate among scholars.`,
+      verb:      `Governments need to _______ this issue before it worsens.`,
+      adjective: `The _______ approach led to unexpected improvements.`,
+      adverb:    `She handled the situation _______, avoiding unnecessary conflict.`,
+    };
+    const exampleSentence = word.formExamples?.[targetType] || TEMPLATES[targetType]
+      || `Choose the correct form: _______ (${targetType})`;
+
+    return {
+      type: 'WORD FORM', badgeClass: 'badge-form',
+      prompt: `Which <em>${targetType}</em> form fits the blank?<div class="qcard-sentence">"${exampleSentence}"</div>`,
+      options, answer: targetForm,
     };
   },
 };
 
+// ── pickQuestion ─────────────────────────────
+// Weighted pool: viToEn x2 (highest production value)
+// definitionOnly mode for due sessions = flashcard only
 function pickQuestion(word, allWords) {
-  const types = ['definition','antonym','collocation','sentiment','wordInContext'];
-  const shuffledTypes = shuffle(types);
-  for (const t of shuffledTypes) {
-    const q = QTypes[t](word, allWords);
-    if (q) return q;
-  }
-  return QTypes.definition(word, allWords);
+  if (S.definitionOnly) return QTypes.flashcard(word);
+
+  const pool = [];
+  const add = (q, weight=1) => { if (q) for (let i=0; i<weight; i++) pool.push(q); };
+
+  add(QTypes.flashcard(word),          1);
+  add(QTypes.viToEn(word, allWords),   2);
+  add(QTypes.antonym(word, allWords),  1);
+  add(QTypes.collocation(word),        1);
+  add(QTypes.fillIn(word, allWords),   1);
+  add(QTypes.connotation(word),        1);
+  if (word.forms) add(QTypes.wordForm(word, allWords), 1);
+
+  if (pool.length === 0) return QTypes.flashcard(word);
+  return pool[Math.floor(Math.random() * pool.length)];
 }
 
 function renderQuiz() {
@@ -451,27 +551,68 @@ function renderQuiz() {
   const q = pickQuestion(word, S.words);
 
   const card = document.getElementById('quizCard');
-  const keys = ['A','B','C','D'];
-
   card.className = 'quiz-card card-anim';
-  card.innerHTML = `
-    <div class="qcard-top">
-      <span class="qcard-type-badge ${q.badgeClass}">${q.type}</span>
-      <div class="qcard-pos">${word.type || ''}</div>
-      <div class="qcard-prompt">${q.prompt}</div>
-    </div>
-    <div class="qcard-options">
-      ${q.options.map((opt, i) => `
-        <button class="opt-btn" data-val="${escHtml(opt)}"
-          onclick="handleAnswer(this, '${escHtml(q.answer)}', '${escHtml(word.word)}', '${escHtml(word.meaning)}', '${escHtml(q.type)}')">
-          <span class="opt-key">${keys[i]}</span>
-          ${opt}
-        </button>
-      `).join('')}
-    </div>
-  `;
+
+  if (q.isFlashcard) {
+    card.innerHTML = `
+      <div class="qcard-top">
+        <span class="qcard-type-badge ${q.badgeClass}">FLASHCARD</span>
+        <div class="qcard-pos">${word.type || ''}</div>
+        <div class="flashcard-word">${word.word}</div>
+        ${word.example ? `<div class="qcard-sentence">"${word.example}"</div>` : ''}
+      </div>
+      <div class="flashcard-reveal-area" id="fcReveal" style="display:none">
+        <div class="flashcard-meaning">${word.meaning}</div>
+        ${word.collocation ? `<div class="flashcard-coll">📌 ${word.collocation}</div>` : ''}
+        ${word.antonym ? `<div class="flashcard-coll">↔ ${word.antonym}</div>` : ''}
+      </div>
+      <div class="flashcard-actions" id="fcActions">
+        <button class="fc-reveal-btn" onclick="revealFlashcard()">Xem nghĩa</button>
+      </div>
+    `;
+  } else {
+    const keys = ['A','B','C','D'];
+    card.innerHTML = `
+      <div class="qcard-top">
+        <span class="qcard-type-badge ${q.badgeClass}">${q.type}</span>
+        <div class="qcard-pos">${word.type || ''}</div>
+        <div class="qcard-prompt">${q.prompt}</div>
+      </div>
+      <div class="qcard-options">
+        ${q.options.map((opt, i) => `
+          <button class="opt-btn" data-val="${escHtml(opt)}"
+            onclick="handleAnswer(this, '${escHtml(q.answer)}', '${escHtml(word.word)}', '${escHtml(word.meaning)}', '${escHtml(q.type)}')">
+            <span class="opt-key">${keys[i]}</span>
+            ${opt}
+          </button>
+        `).join('')}
+      </div>
+    `;
+  }
 
   updateProgress();
+}
+
+function revealFlashcard() {
+  document.getElementById('fcReveal').style.display = 'block';
+  document.getElementById('fcActions').innerHTML = `
+    <button class="fc-know-btn" onclick="rateFlashcard(true)">✓ Biết rồi</button>
+    <button class="fc-forget-btn" onclick="rateFlashcard(false)">✗ Chưa nhớ</button>
+  `;
+  // Space/Enter = "Biết rồi" after reveal
+  S._fcRevealed = true;
+}
+
+function rateFlashcard(knew) {
+  S._fcRevealed = false;
+  const idx = S.queue[S.queuePos];
+  const word = S.words[idx];
+  updateSRSWord(word.word, knew);
+  if (knew) { S.correct++; playCorrect(); }
+  else { S.wrong++; speakWordUK(word.word); }
+  updateProgress();
+  S.queuePos++;
+  setTimeout(renderQuiz, 300);
 }
 
 function escHtml(str) {
@@ -546,6 +687,11 @@ document.addEventListener('keydown', e => {
   if (!document.getElementById('session').classList.contains('active')) return;
   // Space/Enter → click Next button if showing
   if (e.key === ' ' || e.key === 'Enter') {
+    // Flashcard: space reveals, then space = know
+    const revealBtn = document.querySelector('.fc-reveal-btn');
+    if (revealBtn) { e.preventDefault(); revealBtn.click(); return; }
+    const knowBtn = document.querySelector('.fc-know-btn');
+    if (knowBtn) { e.preventDefault(); knowBtn.click(); return; }
     const nextBtn = document.querySelector('.strip-next-btn');
     if (nextBtn) { e.preventDefault(); nextBtn.click(); return; }
   }
