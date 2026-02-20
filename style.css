@@ -429,6 +429,47 @@ body {
 .mode-indicator-section-reading  { background: #e3f2fd; color: #1565c0; }
 .mode-indicator-section-listening { background: #f3e5f5; color: #6a1b9a; }
 
+/* ── VocabSave buttons ───────────────────── */
+.vocabsave-btn {
+  background: var(--card);
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  width: 34px;
+  height: 34px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  cursor: pointer;
+  transition: all .15s;
+  flex-shrink: 0;
+  padding: 0;
+}
+.vocabsave-btn:hover { border-color: var(--text2); background: var(--card2); }
+
+.import-toast {
+  position: fixed;
+  bottom: 32px;
+  left: 50%;
+  transform: translateX(-50%) translateY(20px);
+  background: #1a1916;
+  color: #fff;
+  font-family: 'Be Vietnam Pro', sans-serif;
+  font-size: 14px;
+  font-weight: 600;
+  padding: 12px 24px;
+  border-radius: 99px;
+  opacity: 0;
+  transition: all .25s;
+  z-index: 9999;
+  white-space: nowrap;
+  box-shadow: 0 4px 20px rgba(0,0,0,.25);
+}
+.import-toast.show {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
 /* ── Mute toggle button ───────────────────── */
 .mute-toggle {
   background: var(--card);

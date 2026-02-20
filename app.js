@@ -154,8 +154,74 @@ function showScreen(id) {
 }
 
 // ════════════════════════════════════════════
-// HOME
+// VOCABSAVE — export / import SRS data
 // ════════════════════════════════════════════
+function vocabSaveExport() {
+  const data = {
+    _version: 1,
+    _exported: new Date().toISOString(),
+    srs: loadSRS(),
+  };
+  const json = JSON.stringify(data, null, 2);
+  const blob = new Blob([json], { type: 'application/json' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href     = url;
+  a.download = 'VocabSave.json';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function vocabSaveImport() {
+  const input = document.createElement('input');
+  input.type   = 'file';
+  input.accept = '.json,application/json';
+  input.onchange = e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = ev => {
+      try {
+        const data = JSON.parse(ev.target.result);
+        if (!data.srs || typeof data.srs !== 'object') throw new Error('Invalid file');
+        // Merge: imported data wins on conflict (newer device)
+        const current = loadSRS();
+        const merged  = { ...current };
+        Object.entries(data.srs).forEach(([word, rec]) => {
+          // Keep whichever record has more reps (more studied)
+          if (!merged[word] || rec.reps >= merged[word].reps) {
+            merged[word] = rec;
+          }
+        });
+        saveSRS(merged);
+        renderHome();
+        showImportToast(Object.keys(data.srs).length);
+      } catch {
+        alert('File không hợp lệ. Vui lòng chọn file VocabSave.json đúng định dạng.');
+      }
+    };
+    reader.readAsText(file);
+  };
+  document.body.appendChild(input);
+  input.click();
+  document.body.removeChild(input);
+}
+
+function showImportToast(count) {
+  const toast = document.createElement('div');
+  toast.className = 'import-toast';
+  toast.textContent = `✓ Đã khôi phục ${count} từ`;
+  document.body.appendChild(toast);
+  setTimeout(() => toast.classList.add('show'), 10);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => document.body.removeChild(toast), 300);
+  }, 2800);
+}
+
+
 const BOOKS = {
   cambridge: { label: 'Cambridge', volumes: [13,14,15,16,17,18,19,20] },
   road:      { label: 'Road to IELTS', volumes: [1,2,3,4,5,6] }
