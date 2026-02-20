@@ -111,10 +111,10 @@ function updateMuteUI() {
     btn.classList.toggle('muted', muted);
   });
 }
-
-// Wrap speakWordUK to respect mute
-const _origSpeak = speakWordUK;
-function speakWordUK(word) { if (!isMuted()) _origSpeak(word); }
+// speakWord — defined after speakWordUK, respects mute
+function speakWord(word) {
+  if (!isMuted()) speakWordUK(word);
+}
 
 let S = {
   bookKey: 'cambridge',
@@ -570,19 +570,29 @@ const QTypes = {
     }
     if (partnerIdx === -1) return null;
 
-    // Wrong partners by word type
-    // noun target   → swap the verb/adj before it
-    // verb target   → swap the adverb after it
-    // adj target    → swap the noun after it
-    // adverb target → swap the verb before it
+    // Partner pools — swap based on what the PARTNER word is, not the target word type
+    // If partner is before target (verb before noun): swap with other verbs
+    // If partner is after target (noun after verb): swap with other nouns
+    // General pools by target type:
     const POOLS = {
       noun:      ['gain','lose','build','create','seek','avoid','challenge','damage','restore','maintain','undermine','exacerbate'],
-      verb:      ['rapidly','gradually','significantly','completely','consistently','severely','steadily','dramatically','temporarily','partially'],
+      verb:      {
+        before: ['rapidly','gradually','significantly','completely','consistently','severely','steadily','dramatically'],  // adverb after verb
+        after:  ['growth','progress','decline','situation','problem','solution','record','pattern','system','process'],    // noun object after verb
+      },
       adjective: ['growth','progress','decline','situation','shift','response','outcome','pressure','demand','behaviour','capacity'],
       adverb:    ['act','respond','behave','operate','perform','react','engage','proceed','function','develop','approach'],
       phrase:    ['gain','lose','build','seek','avoid','challenge','damage','restore','maintain','undermine'],
     };
-    const pool = POOLS[word.type] || POOLS.noun;
+
+    let pool;
+    if (word.type === 'verb') {
+      // If partner is AFTER target → it's a noun object → use noun pool
+      // If partner is BEFORE target → it's an adverb modifier → use adverb pool
+      pool = partnerIdx > tEnd ? POOLS.verb.after : POOLS.verb.before;
+    } else {
+      pool = POOLS[word.type] || POOLS.noun;
+    }
     const partner = parts[partnerIdx];
     const wrongs = pool.filter(p => p !== partner && !coll.toLowerCase().includes(p)).slice(0, 3);
     if (wrongs.length < 2) return null;
@@ -760,10 +770,13 @@ function renderQuiz() {
         <div class="qcard-pos">${word.type || ''}</div>
         <div class="qcard-prompt">${q.prompt}</div>
       </div>
-      <div class="qcard-options">
+      <div class="qcard-options" 
+        data-answer="${escAttr(q.answer)}"
+        data-word="${escAttr(word.word)}"
+        data-meaning="${escAttr(word.meaning)}"
+        data-qtype="${escAttr(q.type)}">
         ${q.options.map((opt, i) => `
-          <button class="opt-btn" data-val="${escHtml(opt)}"
-            onclick="handleAnswer(this, '${escHtml(q.answer)}', '${escHtml(word.word)}', '${escHtml(word.meaning)}', '${escHtml(q.type)}')">
+          <button class="opt-btn" data-val="${escAttr(opt)}" onclick="handleAnswer(this)">
             <span class="opt-key">${keys[i]}</span>
             ${opt}
           </button>
@@ -783,7 +796,7 @@ function revealFlashcard() {
     <button class="fc-know-btn" onclick="rateFlashcard(true)">✓ Biết rồi</button>
     <button class="fc-forget-btn" onclick="rateFlashcard(false)">✗ Chưa nhớ</button>
   `;
-  speakWordUK(word.word);
+  speakWord(word.word);
   S._fcRevealed = true;
 }
 
@@ -793,7 +806,7 @@ function rateFlashcard(knew) {
   const word = S.words[idx];
   updateSRSWord(word.word, knew);
   if (knew) { S.correct++; playCorrect(); }
-  else { S.wrong++; speakWordUK(word.word); }
+  else { S.wrong++; speakWord(word.word); }
   updateProgress();
   S.queuePos++;
   setTimeout(renderQuiz, 300);
@@ -803,7 +816,17 @@ function escHtml(str) {
   return (str || '').replace(/'/g, "\\'").replace(/"/g, '&quot;');
 }
 
-function handleAnswer(btn, correctAnswer, wordStr, wordMeaning, qType) {
+function escAttr(str) {
+  return (str || '').replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+function handleAnswer(btn) {
+  const container = btn.closest('.qcard-options');
+  const correctAnswer = container.dataset.answer;
+  const wordStr      = container.dataset.word;
+  const wordMeaning  = container.dataset.meaning;
+  const qType        = container.dataset.qtype;
+
   document.querySelectorAll('.opt-btn').forEach(b => b.disabled = true);
   const chosen = btn.dataset.val;
   const isCorrect = chosen === correctAnswer;
@@ -811,7 +834,7 @@ function handleAnswer(btn, correctAnswer, wordStr, wordMeaning, qType) {
   if (isCorrect) {
     btn.classList.add('correct');
     playCorrect();
-    speakWordUK(wordStr);
+    speakWord(wordStr);
     S.correct++;
     updateSRSWord(wordStr, true);
   } else {
@@ -819,7 +842,7 @@ function handleAnswer(btn, correctAnswer, wordStr, wordMeaning, qType) {
     document.querySelectorAll('.opt-btn').forEach(b => {
       if (b.dataset.val === correctAnswer) b.classList.add('correct');
     });
-    speakWordUK(wordStr);
+    speakWord(wordStr);
     S.wrong++;
     if (!S.wrongWords.includes(wordStr)) S.wrongWords.push(wordStr);
     updateSRSWord(wordStr, false);

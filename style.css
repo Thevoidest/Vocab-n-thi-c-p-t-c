@@ -1018,4 +1018,4 @@ body {
   cursor: pointer;
 }
 .fc-know-btn   { background: var(--green); color: #fff; }
-.fc-forget-btn { background: var(--red);   color: #fff; }
+.fc-forget-btn { background: var(--accent); color: #fff; }
